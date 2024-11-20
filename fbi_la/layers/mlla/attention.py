@@ -1,10 +1,7 @@
 import torch
 import torch.nn as nn
 
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '/public/liguoqi/ssl/wds/flash-non-causal-linear-attention')))
-from fla_nc.ops.simple_la.attention import simple_la
+from fbi_la.ops.simple_la.attention import simple_la
 
 
 class RoPE(torch.nn.Module):

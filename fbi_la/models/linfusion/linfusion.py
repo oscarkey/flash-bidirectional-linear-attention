@@ -2,9 +2,7 @@ from diffusers.models.attention_processor import Attention
 from diffusers import ModelMixin, ConfigMixin
 import functools
 
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '/public/liguoqi/ssl/wds/flash-non-causal-linear-attention')))
-from fla_nc.layers.linfusion.attention import GeneralizedLinearAttention
+from fbi_la.layers.linfusion.attention import GeneralizedLinearAttention
 
 
 model_dict = {

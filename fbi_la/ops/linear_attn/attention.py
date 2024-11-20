@@ -7,10 +7,7 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '/public/liguoqi/ssl/wds/flash-non-causal-linear-attention')))
-from fla_nc.utils import contiguous
+from fbi_la.utils import contiguous
 
 
 @triton.jit
