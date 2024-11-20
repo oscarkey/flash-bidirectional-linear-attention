@@ -43,6 +43,12 @@ B8-H16-D64:
 7  16384.0   1.928192    0.980992  10.237952    9.684992
 ```
 
+# TODO
+- improve memory efficiency during backpropagation
+- replace ``torch.sum()`` operation
+- implement more models
+  - VSSD
+  - RALA
 
 # Acknowledgments
 Thanks to the following repositories for their inspiration:
