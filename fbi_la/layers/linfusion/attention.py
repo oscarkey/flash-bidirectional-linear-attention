@@ -81,7 +81,7 @@ class GeneralizedLinearAttention(Attention):
         elif mode == 'triton':
             query, key, value = map(lambda x: rearrange(x, '(b h) l d -> b h l d', h=self.heads), [query, key, value])
 
-            hidden_states = linear_attention(query, key, value, 1.0)
+            hidden_states = linear_attention(query, key, value)
             
             hidden_states = rearrange(hidden_states, 'b h l d -> (b h) l d')
         else:
@@ -122,4 +122,4 @@ if __name__ == "__main__":
     
     assert torch.allclose(ref, tri, rtol=0, atol=1e-4)
     assert torch.allclose(ref_dx, tri_dx, rtol=0, atol=1e-4)
-    print("Pass")
+    print("Triton and Torch match")

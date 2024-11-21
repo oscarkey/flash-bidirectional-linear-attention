@@ -4,12 +4,8 @@ import torch
 import triton
 from torch.nn import functional as F
 
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '/public/liguoqi/ssl/wds/flash-non-causal-linear-attention')))
-from fla_nc.ops.linear_attn.attention import linear_attention
-from fla_nc.ops.linear_attn.naive import naive_attn_sum
-from fla_nc.ops.linear_attn.softmax_attn import softmax_attn
+from fbi_la.ops.linear_attn.attention import linear_attention
+from fbi_la.ops.linear_attn.naive import naive_linear_attn
 
 
 @triton.testing.perf_report(
@@ -47,11 +43,11 @@ def benchmark(T, provider):
     quantiles = [0.5, 0.2, 0.8]
     results = 0, 0, 0
     if provider == 'torch_fwd':
-        results = triton.testing.do_bench(lambda: naive_attn_sum(q, k, v), quantiles=quantiles)
+        results = triton.testing.do_bench(lambda: naive_linear_attn(q, k, v), quantiles=quantiles)
     elif provider == 'triton_fwd':
         results = triton.testing.do_bench(lambda: linear_attention(q, k, v), quantiles=quantiles)
     elif provider == 'torch_bwd':
-        results = triton.testing.do_bench(lambda: naive_attn_sum(q, k, v).backward(do), quantiles=quantiles)
+        results = triton.testing.do_bench(lambda: naive_linear_attn(q, k, v).backward(do), quantiles=quantiles)
     elif provider == 'triton_bwd':
         results = triton.testing.do_bench(lambda: linear_attention(q, k, v).backward(do), quantiles=quantiles)
     return results

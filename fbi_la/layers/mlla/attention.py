@@ -123,4 +123,4 @@ if __name__ == "__main__":
     
     assert torch.allclose(ref, tri, rtol=0, atol=1e-3)
     assert torch.allclose(ref_dx, tri_dx, rtol=0, atol=1e-3)
-    print("Pass")
+    print("Triton and Torch match")

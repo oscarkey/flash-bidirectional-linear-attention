@@ -76,7 +76,7 @@ class FocusedLinearAttention(nn.Module):
             kv = (k.transpose(-2, -1) * (n ** -0.5)) @ (v * (n ** -0.5))
             x = q @ kv * z
         elif mode == 'triton':
-            x = linear_attention(q, k, v, 1.0)
+            x = linear_attention(q, k, v)
         else:
             raise NotImplementedError
 
@@ -93,7 +93,7 @@ class FocusedLinearAttention(nn.Module):
     
     
 if __name__ == "__main__":
-    B, H, L, D = 4, 16, 512, 64
+    B, H, L, D = 4, 16, 256, 64
     dtype = torch.float32
 
     x = torch.randn((B, L, H*D), dtype=dtype, device="cuda", requires_grad=True)
@@ -117,4 +117,4 @@ if __name__ == "__main__":
     
     assert torch.allclose(ref, tri, rtol=0, atol=1e-4)
     assert torch.allclose(ref_dx, tri_dx, rtol=0, atol=1e-4)
-    print("Pass")
+    print("Triton and Torch match")
