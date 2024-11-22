@@ -29,6 +29,14 @@ More models will be implemented gradually.
 P.S.: The current implementation of MLLA is relatively basic and will be updated soon.
 
 # Usage
+
+## Installation
+``` shell
+git clone https://github.com/hp-l33/flash-bidirectional-linear-attention.git
+pip install -e flash-bidirectional-linear-attention/.
+```
+
+## Integrated Models
 This library has integrated some models, which can be called directly. Taking [LinFusion](https://github.com/Huage001/LinFusion) as an example:
 ``` python
 from diffusers import AutoPipelineForText2Image
