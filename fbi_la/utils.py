@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# Copyright (c) 2024 Songlin Yang
 
 import functools
 

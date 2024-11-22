@@ -1,3 +1,5 @@
+# https://github.com/LeapLabTHU/FLatten-Transformer/blob/master/models/flatten_pvt.py
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

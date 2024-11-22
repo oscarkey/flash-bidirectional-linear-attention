@@ -18,17 +18,17 @@ This project is currently maintained by an individual and remains a work in prog
 # Models
 Roughly sorted according to the timeline supported in FBi-LA
 
-| Date    | Model     | Title                                                                                                     |                                  Paper                                   |                                            Code                                             |                                                  FLA impl                                                   |
-| :------ | :-------- | :-------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------: |
-| 2024-11 | Linfusion    | LinFusion: 1 GPU, 1 Minute, 16K Image                                   |                [arxiv](https://arxiv.org/abs/2409.02097)                 |                [official](https://github.com/Huage001/LinFusion)                | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/linfusion/attention.py) |
-| 2024-11 | MLLA       | Demystify Mamba in Vision: A Linear Attention Perspective                                      |                [arxiv](https://arxiv.org/abs/2405.16605)                 |                [official](https://github.com/LeapLabTHU/MLLA)                |         [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/mlla/attention.py)          |
-| 2024-11 | Focused-LA     | FLatten Transformer: Vision Transformer using Focused Linear Attention                                                               | [arxiv](https://arxiv.org/abs/2308.00442) |                     [official](https://github.com/LeapLabTHU/FLatten-Transformer)                     |        [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/focused_la/attention.py)         |
+| Date    | Model     | Title                                                                  | Paper                                     | Code                                                          | FLA impl                                                                                                              |
+| :------ | :-------- | :--------------------------------------------------------------------- | :---------------------------------------: | :-----------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------: |
+| 2024-11 | Linfusion | LinFusion: 1 GPU, 1 Minute, 16K Image                                  | [arxiv](https://arxiv.org/abs/2409.02097) | [official](https://github.com/Huage001/LinFusion)             | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/linfusion/attention.py) |
+| 2024-11 | MLLA      | Demystify Mamba in Vision: A Linear Attention Perspective              | [arxiv](https://arxiv.org/abs/2405.16605) | [official](https://github.com/LeapLabTHU/MLLA)                | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/mlla/attention.py)      |
+| 2024-11 | Focused-LA| FLatten Transformer: Vision Transformer using Focused Linear Attention | [arxiv](https://arxiv.org/abs/2308.00442) | [official](https://github.com/LeapLabTHU/FLatten-Transformer) | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/focused_la/attention.py)|
 
 More models will be implemented gradually.
 
 P.S.: The current implementation of MLLA is relatively basic and will be updated soon.
 
-# Benchmark
+# Benchmarks
 Tested on an A800 80G GPU.
 ``` shell
 B8-H16-D64:
@@ -45,7 +45,7 @@ B8-H16-D64:
 
 # TODO
 - improve memory efficiency during backpropagation
-- replace ``torch.sum()`` operation
+- replace ``torch.sum()`` and ``torch.mean()`` operations
 - implement more models
   - VSSD
   - RALA

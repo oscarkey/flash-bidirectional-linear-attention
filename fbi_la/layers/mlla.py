@@ -1,3 +1,5 @@
+# https://github.com/LeapLabTHU/MLLA/blob/master/models/mlla.py
+
 import torch
 import torch.nn as nn
 
@@ -33,7 +35,7 @@ class RoPE(torch.nn.Module):
         return torch.view_as_real(pe_x).flatten(-2)
 
 
-class LinearAttention(nn.Module):
+class MambaLikeLinearAttention(nn.Module):
     r""" Linear Attention with LePE and RoPE.
 
     Args:
@@ -105,7 +107,7 @@ if __name__ == "__main__":
     x = torch.randn((B, L, H*D), dtype=dtype, device="cuda", requires_grad=True)
     do = torch.randn_like(x).cuda()
     
-    model = LinearAttention(dim=H*D, input_resolution=(16, 16), num_heads=H).cuda()
+    model = MambaLikeLinearAttention(dim=H*D, input_resolution=(16, 16), num_heads=H).cuda()
     
     # naive
     ref = model(x, mode='torch')
