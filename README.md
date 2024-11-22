@@ -39,6 +39,7 @@ pip install -e flash-bidirectional-linear-attention/.
 ## Integrated Models
 This library has integrated some models, which can be called directly. Taking [LinFusion](https://github.com/Huage001/LinFusion) as an example:
 ``` python
+import torch
 from diffusers import AutoPipelineForText2Image
 from fbi_la.models import LinFusion
 
