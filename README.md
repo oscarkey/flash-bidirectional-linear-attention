@@ -28,6 +28,26 @@ More models will be implemented gradually.
 
 P.S.: The current implementation of MLLA is relatively basic and will be updated soon.
 
+# Usage
+This library has integrated some models, which can be called directly. Taking [LinFusion](https://github.com/Huage001/LinFusion) as an example:
+``` python
+from diffusers import AutoPipelineForText2Image
+from fbi_la.models import LinFusion
+
+sd_repo = "Lykon/dreamshaper-8"
+
+pipeline = AutoPipelineForText2Image.from_pretrained(
+    sd_repo, torch_dtype=torch.float16, variant="fp16"
+).to(torch.device("cuda"))
+
+linfusion = LinFusion.construct_for(pipeline)
+
+image = pipeline(
+    "An astronaut floating in space. Beautiful view of the stars and the universe in the background.",
+    generator=torch.manual_seed(123)
+).images[0]
+```
+
 # Benchmarks
 Tested on an A800 80G GPU.
 ``` shell
