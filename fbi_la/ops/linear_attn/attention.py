@@ -10,14 +10,14 @@ import triton.language as tl
 from fbi_la.utils import contiguous
 
 
-@triton.autotune(
-    configs=[
-        triton.Config({"BL": 128, "BK": 128, "BV": 128}, num_warps=8),
-        triton.Config({"BL": 128, "BK": 64, "BV": 64}, num_warps=4),
-        triton.Config({"BL": 64, "BK": 64, "BV": 64}, num_warps=2),
-    ],
-    key=["L", "DK", "DV"],
-)
+# @triton.autotune(
+#     configs=[
+#         triton.Config({"BL": 128, "BK": 128, "BV": 128}, num_warps=8),
+#         triton.Config({"BL": 128, "BK": 64, "BV": 64}, num_warps=4),
+#         triton.Config({"BL": 64, "BK": 64, "BV": 64}, num_warps=2),
+#     ],
+#     key=["L", "DK", "DV"],
+# )
 @triton.jit
 def _fwd_kv_kernel(
     K, V, S, Z,
@@ -82,14 +82,14 @@ def _fwd_kv_kernel(
     tl.store(Z_block_ptr, z.to(Z.dtype.element_ty), mask=((i_k * BK + tl.arange(0, BK)) < DK))
  
 
-@triton.autotune(
-    configs=[
-        triton.Config({"BL": 128, "BK": 128, "BV": 128}, num_warps=8),
-        triton.Config({"BL": 128, "BK": 64, "BV": 64}, num_warps=4),
-        triton.Config({"BL": 64, "BK": 64, "BV": 64}, num_warps=2),
-    ],
-    key=["L", "DK", "DV"],
-)
+# @triton.autotune(
+#     configs=[
+#         triton.Config({"BL": 128, "BK": 128, "BV": 128}, num_warps=8),
+#         triton.Config({"BL": 128, "BK": 64, "BV": 64}, num_warps=4),
+#         triton.Config({"BL": 64, "BK": 64, "BV": 64}, num_warps=2),
+#     ],
+#     key=["L", "DK", "DV"],
+# )
 @triton.jit
 def _fwd_qs_kernel(
     Q, S, O, Z,
@@ -369,9 +369,9 @@ class LinearAttnFunction(torch.autograd.Function):
             z.stride(2),
             scale,
             B, H, L, K, V,
-            # BL=BL, BV=BV, BK=BK,
-            # num_warps=num_warps,
-            # num_stages=num_stages,
+            BL=BL, BV=BV, BK=BK,
+            num_warps=num_warps,
+            num_stages=num_stages,
         )
         s = s.sum(0).to(k.dtype)
         z = z.sum(0).to(k.dtype)
@@ -385,9 +385,9 @@ class LinearAttnFunction(torch.autograd.Function):
             s.stride(1), s.stride(2), s.stride(3),
             z.stride(1),
             B, H, L, K, V,
-            # BL=BL, BV=BV, BK=BK,
-            # num_warps=num_warps,
-            # num_stages=num_stages,
+            BL=BL, BV=BV, BK=BK,
+            num_warps=num_warps,
+            num_stages=num_stages,
         )
         
         ctx.save_for_backward(q, k, v, o, s, z)
