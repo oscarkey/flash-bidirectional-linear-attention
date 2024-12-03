@@ -1,10 +1,10 @@
 Define $\phi(\cdot)$ as a feature map, such as $\text{elu}(\cdot) + 1$, and let $N$ be the sequence length. Linear attention can be written as:
 
 $$
-\boldsymbol{o}_i = \frac{\phi(\boldsymbol{q}_i) \sum _{j=1}^N \left( \phi(\boldsymbol{k}_j)^\top \boldsymbol{v}_j \right)}{\phi(\boldsymbol{q}_i) \sum _{j=1}^N \phi(\boldsymbol{k}_j)}.
+\boldsymbol{o}_i = \frac{\phi(\boldsymbol{q}_i) \sum _{j=1}^N \left( \phi(\boldsymbol{k}_j)^\top \boldsymbol{v}_j \right)}{\phi(\boldsymbol{q}_i) \sum _{j=1}^N \phi(\boldsymbol{k}_j)}
 $$
 
-Let $\boldsymbol{s} = \sum _{j=1}^N \phi(\boldsymbol{k}_j)^\top \boldsymbol{v}_j$ and $\boldsymbol{z} = \sum _{j=1}^N \phi(\boldsymbol{k}_j)$. In practical code implementation, to avoid potential overflow caused by summation, $\phi(\boldsymbol{k})$ should be scaled by $N^{-1}$:
+Let $\boldsymbol{z} = \sum _{j=1}^N \phi(\boldsymbol{k}_j)$. In practical code implementation, to avoid potential overflow caused by summation, $\phi(\boldsymbol{k})$ should be scaled by $N^{-1}$:
 
 $$
 \boldsymbol{o}_i = \frac{\phi(\boldsymbol{q}_i) \sum _{j=1}^N \left( N^{-1} \cdot \phi(\boldsymbol{k}_j)^\top \boldsymbol{v}_j \right)}{\phi(\boldsymbol{q}_i) \sum _{j=1}^N \left( N^{-1} \cdot \phi(\boldsymbol{k}_j) \right)}
