@@ -84,7 +84,7 @@ class MambaLikeLinearAttention(nn.Module):
             kv = (k_rope.transpose(-2, -1) * (n ** -0.5)) @ (v * (n ** -0.5))
             x = q_rope @ kv
         elif mode == 'triton':
-            x = simple_la(q_rope, k_rope, v)
+            x = simple_la(q_rope, k_rope, v, scale=n ** -1.0)
         else:
             raise NotImplementedError
         

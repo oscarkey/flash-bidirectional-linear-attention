@@ -12,7 +12,7 @@ def naive_simple_la(
     scale = None
 ):
     if scale is None:
-        scale = k.shape[-2] ** -1.0
+        scale = q.shape[-1] ** -0.5
         
     s = k.transpose(-2, -1) @ (v * scale)
     o = q @ s
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     q = F.elu(q) + 1.0
     k = F.elu(k) + 1.0
     
-    do = torch.randn_like(v).cuda()
+    do = torch.randn_like(v)
     
     # naive
     ref = naive_simple_la(q, k, v)
@@ -62,4 +62,5 @@ if __name__ == "__main__":
     assert check_close(ref_dq, tri_dq)
     assert check_close(ref_dk, tri_dk)
     assert check_close(ref_dv, tri_dv)
-    print("Pass")
+    
+    print("Triton and Torch match")
