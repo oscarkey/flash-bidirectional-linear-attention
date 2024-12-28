@@ -11,11 +11,13 @@ import triton.language as tl
 
 @triton.autotune(
     configs=[
-        triton.Config({"BL": 128, "BK": 128, "BV": 128}, num_warps=8),
-        triton.Config({"BL": 128, "BK": 64, "BV": 64}, num_warps=4),
-        triton.Config({"BL": 64, "BK": 64, "BV": 64}, num_warps=2),
+        triton.Config({'BK': BK, 'BV': BV}, num_warps=num_warps, num_stages=num_stages)
+        for BK in [32, 64]
+        for BV in [32, 64]
+        for num_warps in [2, 4, 8]
+        for num_stages in [2, 3, 4]
     ],
-    key=["L", "DK", "DV"],
+    key=['L']
 )
 @triton.jit
 def _fwd_kv_kernel(
@@ -75,14 +77,13 @@ def _fwd_kv_kernel(
 
 @triton.autotune(
     configs=[
-        triton.Config({"BL": 128}, num_warps=8),
-        triton.Config({"BL": 128}, num_warps=4),
-        triton.Config({"BL": 128}, num_warps=2),
-        triton.Config({"BL": 64}, num_warps=8),
-        triton.Config({"BL": 64}, num_warps=4),
-        triton.Config({"BL": 64}, num_warps=2),
+        triton.Config({'BL': BL, 'BV': BV}, num_warps=num_warps, num_stages=num_stages)
+        for BL in [32, 64]
+        for BV in [32, 64]
+        for num_warps in [2, 4, 8]
+        for num_stages in [2, 3, 4]
     ],
-    key=["L"],
+    key=['L']
 )
 @triton.jit
 def _fwd_qs_kernel(
@@ -140,11 +141,13 @@ def _fwd_qs_kernel(
 
 @triton.autotune(
     configs=[
-        triton.Config({"BL": 128, "BK": 128, "BV": 128}, num_warps=8),
-        triton.Config({"BL": 128, "BK": 64, "BV": 64}, num_warps=4),
-        triton.Config({"BL": 64, "BK": 64, "BV": 64}, num_warps=2),
+        triton.Config({'BK': BK, 'BV': BV}, num_warps=num_warps, num_stages=num_stages)
+        for BK in [32, 64]
+        for BV in [32, 64]
+        for num_warps in [2, 4, 8]
+        for num_stages in [2, 3, 4]
     ],
-    key=["L", "DK", "DV"],
+    key=['L']
 )
 @triton.jit
 def _bwd_ds_kernel(
@@ -203,14 +206,13 @@ def _bwd_ds_kernel(
 
 @triton.autotune(
     configs=[
-        triton.Config({"BL": 128}, num_warps=8),
-        triton.Config({"BL": 128}, num_warps=4),
-        triton.Config({"BL": 128}, num_warps=2),
-        triton.Config({"BL": 64}, num_warps=8),
-        triton.Config({"BL": 64}, num_warps=4),
-        triton.Config({"BL": 64}, num_warps=2),
+        triton.Config({'BL': BL, 'BK': BK}, num_warps=num_warps, num_stages=num_stages)
+        for BL in [32, 64]
+        for BK in [32, 64]
+        for num_warps in [2, 4, 8]
+        for num_stages in [2, 3, 4]
     ],
-    key=["L"],
+    key=['L']
 )
 @triton.jit
 def _bwd_dqk_kernel(
@@ -304,14 +306,13 @@ def _bwd_dqk_kernel(
 
 @triton.autotune(
     configs=[
-        triton.Config({"BL": 128}, num_warps=8),
-        triton.Config({"BL": 128}, num_warps=4),
-        triton.Config({"BL": 128}, num_warps=2),
-        triton.Config({"BL": 64}, num_warps=8),
-        triton.Config({"BL": 64}, num_warps=4),
-        triton.Config({"BL": 64}, num_warps=2),
+        triton.Config({'BL': BL, 'BV': BV}, num_warps=num_warps, num_stages=num_stages)
+        for BL in [32, 64]
+        for BV in [32, 64]
+        for num_warps in [2, 4, 8]
+        for num_stages in [2, 3, 4]
     ],
-    key=["L"],
+    key=['L']
 )
 @triton.jit
 def _bwd_dv_kernel(
@@ -353,11 +354,10 @@ def _bwd_dv_kernel(
         k = tl.load(K_block_ptr, boundary_check=(0, 1))
         ds = tl.load(dS_block_ptr, boundary_check=(0, 1))
 
-        dv += tl.dot(k, ds, allow_tf32=False) * scale
+        dv += tl.dot(k, ds.to(k.dtype), allow_tf32=False) * scale
         
         K_block_ptr = tl.advance(K_block_ptr, (0, BK))
         dS_block_ptr = tl.advance(dS_block_ptr, (BK, 0))
-    
 
     dV_block_ptr = tl.make_block_ptr(
         base=dV + off_bs_head * stride_vo_bh,
@@ -376,6 +376,8 @@ class SimpleLinearAttnFunction(torch.autograd.Function):
     def forward(ctx, q, k, v, scale):
         B, H, L, K, V = *q.shape, v.shape[-1]
 
+        BL = min(128, max(16, triton.next_power_of_2(L)))
+
         grid = lambda meta: (
             triton.cdiv(V, meta['BV']),
             triton.cdiv(K, meta['BK']),
@@ -389,13 +391,14 @@ class SimpleLinearAttnFunction(torch.autograd.Function):
             s.stride(1), s.stride(2), s.stride(3),
             scale,
             L=L, DK=K, DV=V,
+            BL=BL
         )
         s = s.to(k.dtype)
 
-        BK = min(128, triton.next_power_of_2(K))
-        BV = min(128, triton.next_power_of_2(V))
+        BK = min(64, max(16, triton.next_power_of_2(K)))
+
         grid = lambda meta: (
-            triton.cdiv(V, BV),
+            triton.cdiv(V, meta['BV']),
             triton.cdiv(L, meta['BL']),
             B * H
         )
@@ -406,31 +409,34 @@ class SimpleLinearAttnFunction(torch.autograd.Function):
             v.stride(1), v.stride(2), v.stride(3),
             s.stride(1), s.stride(2), s.stride(3),
             L=L, DK=K, DV=V,
-            BK=BK, BV=BV
+            BK=BK,
         )
-        ctx.save_for_backward(q, k, v)
+        ctx.save_for_backward(q, k, v, s)
         ctx.scale = scale
-        return o, s
+        return o#, s
 
     @staticmethod
-    def backward(ctx, do, ds):
-        q, k, v = ctx.saved_tensors
+    def backward(ctx, do):
+        q, k, v, s = ctx.saved_tensors
         B, H, L, K, V = *q.shape, v.shape[-1]
+
+        BL = min(128, max(16, triton.next_power_of_2(L)))
 
         grid = lambda meta: (
             triton.cdiv(V, meta['BV']),
             triton.cdiv(K, meta['BK']),
             B * H
         )
-        s = torch.empty(B, H, K, V, device=k.device)
-        _fwd_kv_kernel[grid](
-            k, v, s,
-            q.stride(1), q.stride(2), q.stride(3),
-            v.stride(1), v.stride(2), v.stride(3),
-            s.stride(1), s.stride(2), s.stride(3),
-            ctx.scale,
-            L=L, DK=K, DV=V,
-        )
+        # s = torch.empty(B, H, K, V, device=k.device)
+        # _fwd_kv_kernel[grid](
+        #     k, v, s,
+        #     q.stride(1), q.stride(2), q.stride(3),
+        #     v.stride(1), v.stride(2), v.stride(3),
+        #     s.stride(1), s.stride(2), s.stride(3),
+        #     ctx.scale,
+        #     L=L, DK=K, DV=V,
+        #     BL=BL,
+        # )
         ds = torch.empty(B, H, K, V, device=k.device)
         _bwd_ds_kernel[grid](
             q,
@@ -439,12 +445,12 @@ class SimpleLinearAttnFunction(torch.autograd.Function):
             v.stride(1), v.stride(2), v.stride(3),
             ds.stride(1), ds.stride(2), ds.stride(3),
             L=L, DK=K, DV=V,
+            BL=BL,
         )
 
-        BK = min(128, triton.next_power_of_2(K))
-        BV = min(128, triton.next_power_of_2(V))
+        BV = min(64, max(16, triton.next_power_of_2(V)))
         grid = lambda meta: (
-            triton.cdiv(K, BK),
+            triton.cdiv(K, meta['BK']),
             triton.cdiv(L, meta['BL']),
             B * H
         )
@@ -460,11 +466,12 @@ class SimpleLinearAttnFunction(torch.autograd.Function):
             ds.stride(1), ds.stride(2), ds.stride(3),
             ctx.scale,
             L=L, DK=K, DV=V,
-            BK=BK, BV=BV,
+            BV=BV
         )
 
+        BK = min(64, max(16, triton.next_power_of_2(K)))
         grid = lambda meta: (
-            triton.cdiv(V, BV),
+            triton.cdiv(V, meta['BV']),
             triton.cdiv(L, meta['BL']),
             B * H
         )
@@ -476,7 +483,7 @@ class SimpleLinearAttnFunction(torch.autograd.Function):
             ds.stride(1), ds.stride(2), ds.stride(3),
             ctx.scale,
             L=L, DK=K, DV=V,
-            BK=BK, BV=BV,
+            BK=BK
         )
         
         return dq, dk, dv, None, None, None
@@ -504,9 +511,9 @@ def simple_la(
     if scale is None:
         scale = q.shape[-1] ** -0.5
 
-    o, s = SimpleLinearAttnFunction.apply(q, k, v, scale)
+    o = SimpleLinearAttnFunction.apply(q, k, v, scale)
     
-    if retuen_states:
-        return o, s
+    # if retuen_states:
+        # return o, s
     
     return o
