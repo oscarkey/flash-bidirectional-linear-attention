@@ -12,22 +12,23 @@ from fbi_la.utils import contiguous
 
 @triton.autotune(
     configs=[
-        triton.Config({"BL": 128, "BK": 128, "BV": 128}, num_warps=8),
-        triton.Config({"BL": 128, "BK": 64, "BV": 64}, num_warps=4),
-        triton.Config({"BL": 64, "BK": 64, "BV": 64}, num_warps=2),
+        triton.Config({'BL': BL, 'BK': BK, 'BV': BV}, num_warps=num_warps, num_stages=num_stages)
+        for BL in [32, 64, 128]
+        for BK in [64]
+        for BV in [64]
+        for num_warps in [2, 4, 8]
+        for num_stages in [2]
     ],
-    key=["L", "DK", "DV"],
+    key=['L']
 )
 @triton.jit
-def _fwd_kv_kernel(
-    K, V, S, Z,
+def fused_fwd_kernel_s_km(
+    K, V, S, KM,
     stride_qk_bh, stride_qk_l, stride_qk_d,
     stride_vo_bh, stride_vo_l, stride_vo_d,
     stride_s_bh, stride_s_dk, stride_s_dv,
-    stride_z_bh,
+    stride_km_bh,
     scale,
-    B: tl.constexpr,
-    H: tl.constexpr,
     L: tl.constexpr,
     DK: tl.constexpr,
     DV: tl.constexpr,
@@ -35,8 +36,10 @@ def _fwd_kv_kernel(
     BK: tl.constexpr,
     BV: tl.constexpr,
 ):
+    """
+    The fused kernel computes both S = K^T @ V and the mean of K (along the L dimension).
+    """
     start_v, start_k, off_bs_head = tl.program_id(0), tl.program_id(1), tl.program_id(2)
-    NV = tl.cdiv(DV, BV)
 
     K_block_ptr = tl.make_block_ptr(
         base=K + off_bs_head * stride_qk_bh,
@@ -56,7 +59,7 @@ def _fwd_kv_kernel(
     )
     
     s = tl.zeros([BK, BV], dtype=tl.float32)
-    z = tl.zeros([BK], dtype=tl.float32)
+    km = tl.zeros([BK], dtype=tl.float32)
     
     for _ in range(0, L, BL):
         k = tl.load(K_block_ptr, boundary_check=(0, 1))
@@ -64,7 +67,7 @@ def _fwd_kv_kernel(
     
         v = (v * scale).to(v.dtype)
         s += tl.dot(k, v, allow_tf32=False)
-        z += tl.sum(k, axis=1) / L
+        km += tl.sum(k, axis=1) / L
         
         K_block_ptr = tl.advance(K_block_ptr, (0, BL))
         V_block_ptr = tl.advance(V_block_ptr, (BL, 0))
@@ -79,37 +82,29 @@ def _fwd_kv_kernel(
     )
     tl.store(S_block_ptr, s.to(S.dtype.element_ty), boundary_check=(0, 1))
     
-    Z_block_ptr = Z + off_bs_head * stride_z_bh + start_k * BK + tl.arange(0, BK)
-    tl.store(Z_block_ptr, z.to(Z.dtype.element_ty), mask=((start_k * BK + tl.arange(0, BK)) < DK))
+    KM_block_ptr = KM + off_bs_head * stride_km_bh + start_k * BK + tl.arange(0, BK)
+    tl.store(KM_block_ptr, km.to(KM.dtype.element_ty), mask=((start_k * BK + tl.arange(0, BK)) < DK))
 
 
-# @triton.autotune(
-#     configs=[
-#         triton.Config({"BL": 128, "BK": 128, "BV": 128}, num_warps=8),
-#         triton.Config({"BL": 64, "BK": 128, "BV": 128}, num_warps=4),
-#     ],
-#     key=["L", "DK", "DV"],
-# )
 @triton.autotune(
     configs=[
-        triton.Config({"BL": 128}, num_warps=8),
-        triton.Config({"BL": 128}, num_warps=4),
-        triton.Config({"BL": 128}, num_warps=2),
-        triton.Config({"BL": 64}, num_warps=8),
-        triton.Config({"BL": 64}, num_warps=4),
-        triton.Config({"BL": 64}, num_warps=2),
+        triton.Config({'BL': BL, 'BK': BK, 'BV': BV}, num_warps=num_warps, num_stages=num_stages)
+        for BL in [32, 64, 128]
+        for BK in [64]
+        for BV in [64]
+        for num_warps in [2, 4, 8]
+        for num_stages in [2, 3, 4]
     ],
-    key=["L"],
+    key=['L']
 )
 @triton.jit
-def _fwd_qs_kernel(
-    Q, S, O, Z,
+def fused_fwd_kernel_o(
+    Q, S, O, KM,
     stride_qk_bh, stride_qk_l, stride_qk_d,
     stride_vo_bh, stride_vo_l, stride_vo_d,
     stride_s_bh, stride_s_dk, stride_s_dv,
-    stride_z_bh,
-    B: tl.constexpr,
-    H: tl.constexpr,
+    stride_km_bh,
+    eps,
     L: tl.constexpr,
     DK: tl.constexpr,
     DV: tl.constexpr,
@@ -117,16 +112,16 @@ def _fwd_qs_kernel(
     BK: tl.constexpr,
     BV: tl.constexpr,
 ):
-    start_v, start_m, off_bs_head = tl.program_id(0), tl.program_id(1), tl.program_id(2)
-    qkv_base_offset = off_bs_head * stride_qk_bh
-    
-    NV = tl.cdiv(DV, BV)
+    """
+    The fused kernel computes both O = Q @ S / Z
+    """
+    start_v, start_l, off_bs_head = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     
     Q_block_ptr = tl.make_block_ptr(
         base=Q + off_bs_head * stride_qk_bh,
         shape=(L, DK),
         strides=(stride_qk_l, stride_qk_d),
-        offsets=(start_m * BL, 0),
+        offsets=(start_l * BL, 0),
         block_shape=(BL, BK),
         order=(1, 0),
     )
@@ -138,30 +133,30 @@ def _fwd_qs_kernel(
         block_shape=(BK, BV),
         order=(1, 0),
     )
-    Z_block_ptr = Z + off_bs_head * stride_z_bh + tl.arange(0, BK)
+    KM_block_ptr = KM + off_bs_head * stride_km_bh + tl.arange(0, BK)
     
     o = tl.zeros([BL, BV], dtype=tl.float32)
-    z_buffer = tl.zeros([BL], dtype=tl.float32)
+    z = tl.zeros([BL], dtype=tl.float32)
     
-    for i_k in range(0, DK, BK):
+    for offset_k in range(0, DK, BK):
         q = tl.load(Q_block_ptr, boundary_check=(0, 1))
         s = tl.load(S_block_ptr, boundary_check=(0, 1))
-        z = tl.load(Z_block_ptr, mask=((i_k + tl.arange(0, BK)) < DK))
+        km = tl.load(KM_block_ptr, mask=((offset_k + tl.arange(0, BK)) < DK))
     
-        z_buffer += tl.sum(q * z[None, :], axis=1, keep_dims=False)
+        z += tl.sum(q * km[None, :], axis=1, keep_dims=False)
         o += tl.dot(q, s, allow_tf32=False)
         
         Q_block_ptr = tl.advance(Q_block_ptr, (0, BK))
         S_block_ptr = tl.advance(S_block_ptr, (BK, 0))
-        Z_block_ptr = Z_block_ptr + tl.arange(0, BK)
+        KM_block_ptr = KM_block_ptr + tl.arange(0, BK)
         
-    o = o.to(z_buffer.dtype) / (z_buffer[:, None] + 1e-6)
+    o = o / (z[:, None] + eps)
 
     O_block_ptr = tl.make_block_ptr(
         base=O + off_bs_head * stride_vo_bh,
         shape=(L, DV),
         strides=(stride_vo_l, stride_vo_d),
-        offsets=(start_m * BL, start_v * BV),
+        offsets=(start_l * BL, start_v * BV),
         block_shape=(BL, BV),
         order=(1, 0),
     )
@@ -169,14 +164,15 @@ def _fwd_qs_kernel(
 
 
 @triton.jit
-def _bwd_ds_kernel(
-    O, Q, S, Z,
-    DO, DQ, DS, DZ, 
+def fused_bwd_kernel_ds_dq(
+    O, Q, S, KM,
+    dO, dQ, dS, dKZ, 
     stride_qk_bh, stride_qk_l, stride_qk_d,
     stride_vo_bh, stride_vo_l, stride_vo_d,
-    stride_s_bh, stride_s_dk, stride_s_dv,
-    stride_z_bh,
-    stride_dz_bh,
+    stride_ds_bh, stride_ds_k, stride_ds_v,
+    stride_km_bh,
+    stride_dkz_bh,
+    eps,
     B: tl.constexpr,
     H: tl.constexpr,
     L: tl.constexpr,
@@ -186,17 +182,17 @@ def _bwd_ds_kernel(
     BK: tl.constexpr,
     BV: tl.constexpr,
 ):
-    start_kv, start_m, off_bs_head = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+    start_kv, start_l, off_bs_head = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     
     NV = tl.cdiv(DV, BV)
-    i_k = start_kv // (NV)
-    i_v = start_kv % (NV)
+    start_k = start_kv // (NV)
+    start_v = start_kv % (NV)
     
     O_block_ptr = tl.make_block_ptr(
         base=O + off_bs_head * stride_vo_bh,
         shape=(L, DV),
         strides=(stride_vo_l, stride_vo_d),
-        offsets=(start_m * BL, i_v * BV),
+        offsets=(start_l * BL, start_v * BV),
         block_shape=(BL, BV),
         order=(1, 0),
     )
@@ -204,77 +200,79 @@ def _bwd_ds_kernel(
         base=Q + off_bs_head * stride_qk_bh,
         shape=(L, DK),
         strides=(stride_qk_l, stride_qk_d),
-        offsets=(start_m * BL, i_k * BK),
+        offsets=(start_l * BL, start_k * BK),
         block_shape=(BL, BK),
         order=(1, 0),
     )
-    DO_block_ptr = tl.make_block_ptr(
-        base=DO + off_bs_head * stride_vo_bh,
+    dO_block_ptr = tl.make_block_ptr(
+        base=dO + off_bs_head * stride_vo_bh,
         shape=(L, DV),
         strides=(stride_vo_l, stride_vo_d),
-        offsets=(start_m * BL, i_v * BV),
+        offsets=(start_l * BL, start_v * BV),
         block_shape=(BL, BV),
         order=(1, 0),
     )
     S_block_ptr = tl.make_block_ptr(
-        base=S + off_bs_head * stride_s_bh,
+        base=S + off_bs_head * stride_ds_bh,
         shape=(DK, DV),
-        strides=(stride_s_dk, stride_s_dv),
-        offsets=(i_k * BK, i_v * BV),
+        strides=(stride_ds_k, stride_ds_v),
+        offsets=(start_k * BK, start_v * BV),
         block_shape=(BK, BV),
         order=(1, 0),
     )
-    Z_block_ptr = Z + off_bs_head * stride_z_bh + i_k * BK + tl.arange(0, BK)
+    KM_block_ptr = KM + off_bs_head * stride_km_bh + start_k * BK + tl.arange(0, BK)
     
     ds = tl.zeros([BK, BV], dtype=tl.float32)
-    dz = tl.zeros([BL], dtype=tl.float32)
     dq = tl.zeros([BL, BK], dtype=tl.float32)
+    dz = tl.zeros([BL], dtype=tl.float32)
+    dkz = tl.zeros([BK], dtype=tl.float32)
     
-    do = tl.load(DO_block_ptr, boundary_check=(0, 1))
-    o = tl.load(O_block_ptr, boundary_check=(0, 1))
     q = tl.load(Q_block_ptr, boundary_check=(0, 1))
+    o = tl.load(O_block_ptr, boundary_check=(0, 1))
     s = tl.load(S_block_ptr, boundary_check=(0, 1))
-    z = tl.load(Z_block_ptr, mask=((i_k * BK + tl.arange(0, BK)) < DK))
+    do = tl.load(dO_block_ptr, boundary_check=(0, 1))
+    km = tl.load(KM_block_ptr, mask=((start_k * BK + tl.arange(0, BK)) < DK))
     
-    z = tl.sum(q * z[None, :], axis=1, keep_dims=True).to(q.dtype) + 1e-6
-    
+    z = tl.sum(q * km[None, :], axis=1, keep_dims=True) + eps
     ds += tl.dot(tl.trans(q / z).to(do.dtype), do, allow_tf32=False)
     dz -= tl.sum(o * do / z, axis=1)
-    dq += tl.dot(do, tl.trans(s), allow_tf32=False) / z
-    
-    DS_block_ptr = tl.make_block_ptr(
-        base=DS + (off_bs_head + B * H * start_m) * stride_s_bh,
-        shape=(BK, BV),
-        strides=(stride_s_dk, stride_s_dv),
-        offsets=(i_k * BK, i_v * BV),
+    dq += tl.dot(do, tl.trans(s), allow_tf32=False) / z + dz[:, None] * km[None, :]
+    dkz += tl.sum(dz[:, None] * q, axis=0) / L
+
+    dS_block_ptr = tl.make_block_ptr(
+        base=dS + (off_bs_head + B * H * start_l) * stride_ds_bh,
+        shape=(DK, DV),
+        strides=(stride_ds_k, stride_ds_v),
+        offsets=(start_k * BK, start_v * BV),
         block_shape=(BK, BV),
         order=(1, 0),
     )
-    tl.store(DS_block_ptr, ds.to(DS.dtype.element_ty), boundary_check=(0, 1))
+    tl.store(dS_block_ptr, ds.to(dS.dtype.element_ty), boundary_check=(0, 1))
     
-    DQ_block_ptr = tl.make_block_ptr(
-        base=DQ + off_bs_head * stride_vo_bh,
-        shape=(L, BK),
-        strides=(stride_vo_l, stride_vo_d),
-        offsets=(start_m * BL, i_k * BK),
+    dQ_block_ptr = tl.make_block_ptr(
+        # base=dQ + (off_bs_head + B * H * start_v) * stride_qk_bh,
+        base=dQ + off_bs_head * stride_qk_bh,
+        shape=(L, DK),
+        strides=(stride_qk_l, stride_qk_d),
+        offsets=(start_l * BL, start_k * BK),
         block_shape=(BL, BK),
         order=(1, 0),
     )
-    tl.store(DQ_block_ptr, dq.to(DQ.dtype.element_ty), boundary_check=(0, 1))
+    tl.store(dQ_block_ptr, dq.to(dQ.dtype.element_ty), boundary_check=(0, 1))
     
-    DZ_block_ptr = DZ + off_bs_head * stride_dz_bh + start_m * BL + tl.arange(0, BL)
-    tl.store(DZ_block_ptr, dz.to(DZ.dtype.element_ty), mask=((start_m * BL + tl.arange(0, BL)) < L))
+    dKZ_block_ptr = dKZ + (off_bs_head + B * H * start_l) * stride_dkz_bh + start_k * BK + tl.arange(0, BK)
+    tl.store(dKZ_block_ptr, dkz.to(dKZ.dtype.element_ty), mask=((start_k * BK + tl.arange(0, BK)) < DK))
 
-    
+
 @triton.jit
-def _bwd_dkv_kernel(
+def fused_bwd_kernel_dk_dv(
     K, V,
-    dK, dV, dS,
+    dK, dV, dS, dKZ,
     stride_qk_bh, stride_qk_l, stride_qk_d,
+    stride_vo_bh, stride_vo_l, stride_vo_d,
     stride_s_bh, stride_s_dk, stride_s_dv,
+    stride_dkz_bh,
     scale,
-    B: tl.constexpr,
-    H: tl.constexpr,
     L: tl.constexpr,
     DK: tl.constexpr,
     DV: tl.constexpr,
@@ -282,27 +280,25 @@ def _bwd_dkv_kernel(
     BK: tl.constexpr,
     BV: tl.constexpr,
 ):
-    start_kv, start_m, off_bs_head = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+    start_kv, start_l, off_bs_head = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     
     NV = tl.cdiv(DV, BV)
-    i_k = start_kv // (NV)
-    i_v = start_kv % (NV)
+    start_k = start_kv // NV
+    start_v = start_kv % NV
     
-    qkv_base_offset = off_bs_head * stride_qk_bh
-
     K_block_ptr = tl.make_block_ptr(
-        base=K + qkv_base_offset,
+        base=K + off_bs_head * stride_qk_bh,
         shape=(L, DK),
         strides=(stride_qk_l, stride_qk_d),
-        offsets=(start_m * BL, 0),
+        offsets=(start_l * BL, start_k * BK),
         block_shape=(BL, BK),
         order=(1, 0),
     )
     V_block_ptr = tl.make_block_ptr(
-        base=V + qkv_base_offset,
+        base=V + off_bs_head * stride_vo_bh,
         shape=(L, DV),
-        strides=(stride_qk_l, stride_qk_d),
-        offsets=(start_m * BL, 0),
+        strides=(stride_vo_l, stride_vo_d),
+        offsets=(start_l * BL, start_v * BV),
         block_shape=(BL, BV),
         order=(1, 0),
     )
@@ -310,48 +306,50 @@ def _bwd_dkv_kernel(
         base=dS + off_bs_head * stride_s_bh,
         shape=(DK, DV),
         strides=(stride_s_dk, stride_s_dv),
-        offsets=(0, 0),
+        offsets=(start_k * BK, start_v * BV),
         block_shape=(BK, BV),
         order=(1, 0),
     )
+    dKZ_block_ptr = dKZ + off_bs_head * stride_dkz_bh + start_k * BK + tl.arange(0, BK)
 
     dk = tl.zeros([BL, BK], dtype=tl.float32)
     dv = tl.zeros([BL, BV], dtype=tl.float32)
     
-    
-    ds = tl.load(dS_block_ptr, boundary_check=(0, 1))
     k = tl.load(K_block_ptr, boundary_check=(0, 1))
     v = tl.load(V_block_ptr, boundary_check=(0, 1))
+    ds = tl.load(dS_block_ptr, boundary_check=(0, 1))
+    dkz = tl.load(dKZ_block_ptr, mask=((start_k * BK + tl.arange(0, BK)) < DK))
+
     v = (v * scale).to(v.dtype)
     
-    dk += tl.dot(v, tl.trans(ds).to(v.dtype), allow_tf32=False)
-    dv += tl.dot(k, ds.to(k.dtype), allow_tf32=False) * scale
+    dk += tl.dot(v, tl.trans(ds), allow_tf32=False) + dkz[None, :]
+    dv += tl.dot(k, ds, allow_tf32=False) * scale
     
     dK_block_ptr = tl.make_block_ptr(
-        base=dK + qkv_base_offset,
+        base=dK + off_bs_head * stride_qk_bh,
         shape=(L, DK),
         strides=(stride_qk_l, stride_qk_d),
-        offsets=(start_m * BL, 0),
+        offsets=(start_l * BL, start_k * BK),
         block_shape=(BL, BK),
         order=(1, 0),
     )
     dV_block_ptr = tl.make_block_ptr(
-        base=dV + qkv_base_offset,
+        base=dV + off_bs_head * stride_vo_bh,
         shape=(L, DV),
-        strides=(stride_qk_l, stride_qk_d),
-        offsets=(start_m * BL, 0),
+        strides=(stride_vo_l, stride_vo_d),
+        offsets=(start_l * BL, start_v * BV),
         block_shape=(BL, BV),
         order=(1, 0),
     )
     tl.store(dK_block_ptr, dk.to(dK.dtype.element_ty), boundary_check=(0, 1))
     tl.store(dV_block_ptr, dv.to(dV.dtype.element_ty), boundary_check=(0, 1))
-   
-    
+
+
 class LinearAttnFunction(torch.autograd.Function):
 
     @staticmethod
     @contiguous
-    def forward(ctx, q, k, v, scale):
+    def forward(ctx, q, k, v, scale, eps):
         B, H, L, K, V = *q.shape, v.shape[-1]
         
         grid = lambda meta: (
@@ -360,103 +358,95 @@ class LinearAttnFunction(torch.autograd.Function):
             B * H
         )
         s = torch.empty(B, H, K, V, device=k.device)
-        z = torch.empty(B, H, K, device=k.device)
-        _fwd_kv_kernel[grid](
-            k, v, s, z,
+        km = torch.empty(B, H, K, device=k.device)
+        fused_fwd_kernel_s_km[grid](
+            k, v, s, km,
             k.stride(1), k.stride(2), k.stride(3),
             v.stride(1), v.stride(2), v.stride(3),
             s.stride(1), s.stride(2), s.stride(3),
-            z.stride(1),
+            km.stride(1),
             scale,
-            B=B, H=B, L=L, DK=K, DV=V,
+            L=L, DK=K, DV=V,
         )
         s = s.to(k.dtype)
-        z = z.to(k.dtype)
+        km = km.to(k.dtype)
         
-        BK = min(128, triton.next_power_of_2(K))
-        BV = min(128, triton.next_power_of_2(V))
         grid = lambda meta: (
-            # triton.cdiv(V, meta['BV']),
-            triton.cdiv(V, BV),
+            triton.cdiv(V, meta['BV']),
             triton.cdiv(L, meta['BL']),
             B * H
         )
         o = torch.empty_like(v)
-        _fwd_qs_kernel[grid](
-            q, s, o, z,
+        fused_fwd_kernel_o[grid](
+            q, s, o, km,
             q.stride(1), q.stride(2), q.stride(3),
             v.stride(1), v.stride(2), v.stride(3),
             s.stride(1), s.stride(2), s.stride(3),
-            z.stride(1),
-            B=B, H=B, L=L, DK=K, DV=V,
-            BK=BK, BV=BV
+            km.stride(1),
+            eps=eps,
+            L=L, DK=K, DV=V,
         )
-        ctx.save_for_backward(q, k, v, o, s, z)
+        """
+        Since the sizes of S and k.mean are fixed,
+        reading them is faster than recompute in most cases.
+        """
+        ctx.save_for_backward(q, k, v, o, s, km)
         ctx.scale = scale
+        ctx.eps = eps
         return o
 
     @staticmethod
     @contiguous
     def backward(ctx, do):
-        q, k, v, o, s, z = ctx.saved_tensors
+        q, k, v, o, s, km = ctx.saved_tensors
         B, H, L, K, V = *q.shape, v.shape[-1]
         
-        BL = 128
-        BK = min(128, triton.next_power_of_2(k.shape[-1]))
-        BV = min(128, triton.next_power_of_2(v.shape[-1]))
-        BK, BV = max(BK, 16), max(BV, 16)
-        
-        NK = triton.cdiv(K, BK)
-        NV = triton.cdiv(V, BV)
+        """
+        Trade space for time.
+        Load the entire hidden state at once to reduce MAC.
+        This may not be applicable when the size of the hidden state is large,
+        but let's proceed with this approach for now :-).
+        """
+        BL = 32
         NL = triton.cdiv(L, BL)
-        
-        assert NK == 1 and NV == 1
-        
-        num_warps = 4 if K <= 64 else 8
-        num_stages = 2
+
+        BK, BV = K, V
+        NK, NV = triton.cdiv(K, BK), triton.cdiv(V, BV)
+        assert NK == NV == 1, "The fused kernel currently only supports NK = NV = 1"
 
         grid = (NK * NV, NL, B * H)
         
-        do = do.contiguous()
-        dq = torch.zeros_like(q, dtype=torch.float32)
-        dk = torch.empty_like(k)
-        dv = torch.empty_like(v)
-        dz = torch.empty(B, H, L, device=k.device)
+        dq = torch.empty_like(q)
         ds = torch.empty(NL, B, H, K, V, device=k.device)
-
-        _bwd_ds_kernel[grid](
-            o, q, s, z,
-            do, dq, ds, dz,
+        dkz = torch.empty(NL, B, H, K, device=k.device)
+        fused_bwd_kernel_ds_dq[grid](
+            o, q, s, km,
+            do, dq, ds, dkz,
             q.stride(1), q.stride(2), q.stride(3),
             v.stride(1), v.stride(2), v.stride(3),
             ds.stride(2), ds.stride(3), ds.stride(4),
-            z.stride(1),
-            dz.stride(1),
-            B, H, L, K, V,
+            km.stride(1),
+            dkz.stride(2),
+            eps=ctx.eps,
+            B=B, H=H, L=L, DK=K, DV=V,
             BL=BL, BK=BK, BV=BV,
-            num_warps=num_warps,
-            num_stages=num_stages
         )
-        ds = ds.sum(0)#.to(k.dtype)
+        ds = ds.sum(0).to(k.dtype)
+        dkz = dkz.sum(0)
         
-        grid = (NK * NV, NL, B * H)
-        _bwd_dkv_kernel[grid](
+        dk = torch.empty_like(k)
+        dv = torch.empty_like(v)
+        fused_bwd_kernel_dk_dv[grid](
             k, v,
-            dk, dv, ds,
+            dk, dv, ds, dkz,
             k.stride(1), k.stride(2), k.stride(3),
+            v.stride(1), v.stride(2), v.stride(3),
             ds.stride(1), ds.stride(2), ds.stride(3),
-            ctx.scale,
-            B, H, L, K, V,
+            dkz.stride(1),
+            scale=ctx.scale,
+            L=L, DK=K, DV=V,
             BL=BL, BK=BK, BV=BV,
-            num_warps=num_warps,
-            num_stages=num_stages
         )
-        
-        dqk_k = dz.unsqueeze(-1) * k.mean(dim=-2, keepdim=True)
-        dqk_q = (dz.unsqueeze(-1) * q).mean(dim=-2, keepdim=True)
-
-        dq = dq + dqk_k
-        dk = dk + dqk_q
         
         return dq, dk, dv, None, None, None
 
@@ -465,7 +455,8 @@ def linear_attention(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    scale: Optional[int] = None
+    scale: Optional[int] = None,
+    eps: float = 1e-6
 ) -> torch.Tensor:
     r"""
     Args:
@@ -478,8 +469,10 @@ def linear_attention(
         scale (Optional[int]):
             Scale factor for the attention scores.
             If not provided, it will default to `1 / L`. Default: `None`.
+        eps (float):
+            A small constant added to the denominator to prevent division by zero.
     """
     if scale is None:
         scale = k.shape[-2] ** -1.0
-    o = LinearAttnFunction.apply(q, k, v, scale)
+    o = LinearAttnFunction.apply(q, k, v, scale, eps)
     return o
