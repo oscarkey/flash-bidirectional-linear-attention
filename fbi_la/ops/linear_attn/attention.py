@@ -113,7 +113,7 @@ def fused_fwd_kernel_o(
     BV: tl.constexpr,
 ):
     """
-    The fused kernel computes both O = Q @ S / Z
+    The fused kernel computes O = Q @ S / Z
     """
     start_v, start_l, off_bs_head = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     
@@ -388,7 +388,7 @@ class LinearAttnFunction(torch.autograd.Function):
         )
         """
         Since the sizes of S and k.mean are fixed,
-        reading them is faster than recompute in most cases.
+        loading them is faster than recompute in most cases.
         """
         ctx.save_for_backward(q, k, v, o, s, km)
         ctx.scale = scale

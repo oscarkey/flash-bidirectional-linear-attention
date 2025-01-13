@@ -21,21 +21,20 @@ This project is currently maintained by an individual and remains a work in prog
 # Models
 Roughly sorted according to the timeline supported in FBi-LA
 
-| Date    | Model     | Title                                                                  | Paper                                     | Code                                                          | FBi-LA impl                                                                                                           |
+| Year    | Model     | Title                                                                  | Paper                                     | Code                                                          | `fla` impl                                                                                                           |
 | :------ | :-------- | :--------------------------------------------------------------------- | :---------------------------------------: | :-----------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------: |
-| 2024-11 | Linfusion | LinFusion: 1 GPU, 1 Minute, 16K Image                                  | [arxiv](https://arxiv.org/abs/2409.02097) | [official](https://github.com/Huage001/LinFusion)             | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/linfusion.py)           |
-| 2024-11 | MLLA      | Demystify Mamba in Vision: A Linear Attention Perspective              | [arxiv](https://arxiv.org/abs/2405.16605) | [official](https://github.com/LeapLabTHU/MLLA)                | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/mlla.py)                |
-| 2024-11 | Focused-LA| FLatten Transformer: Vision Transformer using Focused Linear Attention | [arxiv](https://arxiv.org/abs/2308.00442) | [official](https://github.com/LeapLabTHU/FLatten-Transformer) | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/focused_la.py)          |
+| 2024 | Linfusion | LinFusion: 1 GPU, 1 Minute, 16K Image                                  | [arxiv](https://arxiv.org/abs/2409.02097) | [official](https://github.com/Huage001/LinFusion)             | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/linfusion.py)           |
+| 2024 | MLLA      | Demystify Mamba in Vision: A Linear Attention Perspective              | [arxiv](https://arxiv.org/abs/2405.16605) | [official](https://github.com/LeapLabTHU/MLLA)                | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/mlla.py)                |
+| 2023 | Focused-LA| FLatten Transformer: Vision Transformer using Focused Linear Attention | [arxiv](https://arxiv.org/abs/2308.00442) | [official](https://github.com/LeapLabTHU/FLatten-Transformer) | [code](https://github.com/hp-l33/flash-bidirectional-linear-attention/blob/main/fbi_la/layers/focused_la.py)          |
 
 More models will be implemented gradually.
 
-P.S.: The current implementation of MLLA is relatively basic and will be updated soon.
 
 # Usage
 
 ## Installation
 ``` shell
-git clone https://github.com/hp-l33/flash-bidirectional-linear-attention.git
+git clone https://github.com/fla-org/flash-bidirectional-linear-attention.git
 pip install -e flash-bidirectional-linear-attention/.
 ```
 
